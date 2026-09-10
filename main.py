@@ -82,7 +82,7 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
         jobs[job_id]["status"] = "downloading"
         add_log(job_id, f"🔍 Mencari video dari @{username}...")
 
-        url = f"https://www.tiktok.com/@{username}"
+        url = f"https://www.tiktok.com/@{username}/video"
 
         cmd = [
             "yt-dlp",
