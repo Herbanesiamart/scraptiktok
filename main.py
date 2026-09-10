@@ -5,9 +5,8 @@ import zipfile
 import json
 import shutil
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
-from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -17,14 +16,6 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "adsy2024")
 jobs: dict = {}
 
 
-class StartRequest(BaseModel):
-    password: str
-    username: str
-    start: int = 1
-    end: int = 10
-    order: str = "newest"  # "newest" | "oldest"
-
-
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend():
     with open("index.html", encoding="utf-8") as f:
@@ -32,24 +23,37 @@ async def serve_frontend():
 
 
 @app.post("/api/start")
-async def start_download(req: StartRequest, background_tasks: BackgroundTasks):
-    if req.password != APP_PASSWORD:
+async def start_download(
+    background_tasks: BackgroundTasks,
+    password: str = Form(...),
+    username: str = Form(...),
+    start: int = Form(1),
+    end: int = Form(10),
+    order: str = Form("newest"),
+    cookies: UploadFile = File(...),
+):
+    if password != APP_PASSWORD:
         raise HTTPException(status_code=401, detail="Password salah")
 
-    if req.start < 1 or req.end < req.start:
+    if start < 1 or end < start:
         raise HTTPException(status_code=400, detail="Range tidak valid")
 
-    if req.end - req.start >= 50:
+    if end - start >= 50:
         raise HTTPException(status_code=400, detail="Maksimal 50 video sekali download")
 
-    username = req.username.strip().lstrip("@")
+    username = username.strip().lstrip("@")
     if not username:
         raise HTTPException(status_code=400, detail="Username tidak boleh kosong")
 
     job_id = str(uuid.uuid4())
-    total = req.end - req.start + 1
+    total = end - start + 1
+    order = order if order in ("newest", "oldest") else "newest"
 
-    order = req.order if req.order in ("newest", "oldest") else "newest"
+    # Simpan cookies.txt sementara
+    cookies_path = f"/tmp/cookies_{job_id}.txt"
+    content = await cookies.read()
+    with open(cookies_path, "wb") as f:
+        f.write(content)
 
     jobs[job_id] = {
         "status": "queued",
@@ -60,7 +64,7 @@ async def start_download(req: StartRequest, background_tasks: BackgroundTasks):
         "username": username,
     }
 
-    background_tasks.add_task(run_download, job_id, username, req.start, req.end, order)
+    background_tasks.add_task(run_download, job_id, username, start, end, order, cookies_path)
 
     return {"job_id": job_id}
 
@@ -70,7 +74,7 @@ def add_log(job_id: str, msg: str):
         jobs[job_id]["logs"].append(msg)
 
 
-async def run_download(job_id: str, username: str, start: int, end: int, order: str = "newest"):
+async def run_download(job_id: str, username: str, start: int, end: int, order: str = "newest", cookies_path: str = None):
     output_dir = Path(f"/tmp/tktk_{job_id}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -91,6 +95,9 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
             "--no-warnings",
             url,
         ]
+
+        if cookies_path and os.path.exists(cookies_path):
+            cmd += ["--cookies", cookies_path]
 
         if order == "oldest":
             cmd.insert(1, "--playlist-reverse")
@@ -136,6 +143,8 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
                 zf.write(f, f.name)
 
         shutil.rmtree(output_dir, ignore_errors=True)
+        if cookies_path and os.path.exists(cookies_path):
+            os.remove(cookies_path)
 
         jobs[job_id]["status"] = "done"
         jobs[job_id]["zip_path"] = str(zip_path)
@@ -145,6 +154,8 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
         jobs[job_id]["status"] = "error"
         add_log(job_id, f"❌ Error tidak terduga: {str(e)}")
         shutil.rmtree(output_dir, ignore_errors=True)
+        if cookies_path and os.path.exists(cookies_path):
+            os.remove(cookies_path)
 
 
 @app.get("/api/progress/{job_id}")

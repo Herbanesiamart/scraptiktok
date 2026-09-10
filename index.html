@@ -226,6 +226,10 @@
     <label>Password</label>
     <input type="password" id="password" placeholder="Masukkan password..." />
 
+    <label>Cookies TikTok <span style="color:#555;font-weight:400">(wajib untuk download video)</span></label>
+    <input type="file" id="cookiesFile" accept=".txt" style="cursor:pointer" />
+    <p class="hint" style="text-align:left;color:#555">Pakai ekstensi <b style="color:#aaa">Get cookies.txt LOCALLY</b> di Chrome → buka TikTok → Export</p>
+
     <label>Username TikTok</label>
     <input type="text" id="username" placeholder="@numata atau numata" />
 
@@ -279,8 +283,10 @@
     const start = parseInt(document.getElementById('start').value);
     const end = parseInt(document.getElementById('end').value);
     const order = document.querySelector('input[name="order"]:checked').value;
+    const cookiesFile = document.getElementById('cookiesFile').files[0];
 
     if (!password) return alert('Password wajib diisi!');
+    if (!cookiesFile) return alert('Upload cookies.txt dulu!');
     if (!username) return alert('Username TikTok wajib diisi!');
     if (!start || !end || start > end) return alert('Range video tidak valid!');
     if (end - start >= 50) return alert('Maksimal 50 video sekali download!');
@@ -289,10 +295,17 @@
     document.getElementById('btnStart').textContent = 'Memulai...';
 
     try {
+      const formData = new FormData();
+      formData.append('password', password);
+      formData.append('username', username);
+      formData.append('start', start);
+      formData.append('end', end);
+      formData.append('order', order);
+      formData.append('cookies', cookiesFile);
+
       const res = await fetch('/api/start', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, username, start, end, order }),
+        body: formData,
       });
 
       const data = await res.json();
