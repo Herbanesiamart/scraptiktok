@@ -7,14 +7,11 @@ import shutil
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Form
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
-import httpx
 
 app = FastAPI()
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "adsy2024")
-TIKWM_BASE = "https://www.tikwm.com/api"
 
-# In-memory job store
 jobs: dict = {}
 
 
@@ -68,116 +65,63 @@ def add_log(job_id: str, msg: str):
         jobs[job_id]["logs"].append(msg)
 
 
-async def fetch_user_videos(username: str, needed: int, log_fn=None) -> list:
-    """Ambil daftar video dari profil TikTok via TikWM API."""
-    all_videos = []
-    cursor = 0
-
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        while len(all_videos) < needed:
-            # TikWM pakai POST dengan form data
-            resp = await client.post(
-                f"{TIKWM_BASE}/user/posts",
-                data={"unique_id": username, "count": 20, "cursor": cursor},
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-
-            if resp.status_code != 200:
-                raise Exception(f"TikWM API HTTP {resp.status_code}: {resp.text[:300]}")
-
-            try:
-                data = resp.json()
-            except Exception:
-                raise Exception(f"TikWM response bukan JSON: {resp.text[:300]}")
-
-            if log_fn:
-                log_fn(f"📡 TikWM response code: {data.get('code')} | total video: {data.get('data', {}).get('total', '?')}")
-
-            if data.get("code") != 0:
-                raise Exception(f"TikWM error: {data.get('msg', 'unknown')} (code {data.get('code')})")
-
-            videos = data.get("data", {}).get("videos", [])
-            if not videos:
-                break
-
-            all_videos.extend(videos)
-
-            if not data["data"].get("hasMore"):
-                break
-
-            cursor = data["data"].get("cursor", 0)
-
-    return all_videos
-
-
 async def run_download(job_id: str, username: str, start: int, end: int, order: str = "newest"):
     output_dir = Path(f"/tmp/tktk_{job_id}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         jobs[job_id]["status"] = "downloading"
-        add_log(job_id, f"🔍 Mengambil daftar video @{username}...")
+        add_log(job_id, f"🔍 Mencari video dari @{username}...")
 
-        all_videos = await fetch_user_videos(username, end, log_fn=lambda m: add_log(job_id, m))
+        url = f"https://www.tiktok.com/@{username}"
 
-        if not all_videos:
-            jobs[job_id]["status"] = "error"
-            add_log(job_id, "❌ Akun tidak ditemukan atau tidak ada video.")
-            return
-
-        # Slice sesuai range (1-indexed)
-        selected = all_videos[start - 1 : end]
+        cmd = [
+            "yt-dlp",
+            "-I", f"{start}:{end}",
+            # Pakai TikTok mobile API (Trill app) — bypass audio-only restriction
+            "--extractor-args", "tiktok:app_name=trill,app_version=34.1.2,manifest_app_version=2023401020",
+            "--merge-output-format", "mp4",
+            "--recode-video", "mp4",
+            "--postprocessor-args", "ffmpeg:-vcodec libx264 -acodec aac -movflags +faststart",
+            "-o", str(output_dir / "%(autonumber)s_%(id)s.%(ext)s"),
+            "--newline",
+            "--no-warnings",
+            url,
+        ]
 
         if order == "oldest":
-            selected = list(reversed(selected))
+            cmd.insert(1, "--playlist-reverse")
 
-        total = len(selected)
-        jobs[job_id]["total"] = total
-
-        if total == 0:
-            jobs[job_id]["status"] = "error"
-            add_log(job_id, f"❌ Tidak ada video di range {start}–{end}. Akun hanya punya {len(all_videos)} video.")
-            return
-
-        add_log(job_id, f"✅ Ditemukan {len(all_videos)} video. Mengunduh {total} video (#{start}–#{start + total - 1})...")
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
 
         downloaded = 0
+        total = end - start + 1
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            for i, video in enumerate(selected):
-                video_id = video.get("video_id") or video.get("id", f"video_{i}")
-                title = video.get("title", "")[:40].strip() or video_id
+        async for raw in process.stdout:
+            line = raw.decode("utf-8", errors="ignore").strip()
+            if not line:
+                continue
 
-                # Ambil URL video tanpa watermark (HD dulu, fallback ke play)
-                video_url = video.get("hdplay") or video.get("play")
+            add_log(job_id, line)
 
-                if not video_url:
-                    add_log(job_id, f"⚠️ Video {i+1}/{total} tidak ada URL, skip.")
-                    continue
+            if "Destination:" in line:
+                downloaded += 1
+                jobs[job_id]["progress"] = downloaded
 
-                add_log(job_id, f"⬇️  Video {i+1}/{total}: {title}")
+            elif "has already been downloaded" in line:
+                downloaded += 1
+                jobs[job_id]["progress"] = downloaded
 
-                try:
-                    resp = await client.get(video_url, follow_redirects=True)
-                    resp.raise_for_status()
-
-                    filename = f"{str(i+1).zfill(5)}_{video_id}.mp4"
-                    filepath = output_dir / filename
-
-                    with open(filepath, "wb") as f:
-                        f.write(resp.content)
-
-                    downloaded += 1
-                    jobs[job_id]["progress"] = downloaded
-                    add_log(job_id, f"✅ Video {i+1}/{total} selesai")
-
-                except Exception as e:
-                    add_log(job_id, f"⚠️ Video {i+1}/{total} gagal: {str(e)}")
+        await process.wait()
 
         files = list(output_dir.iterdir())
         if not files:
             jobs[job_id]["status"] = "error"
-            add_log(job_id, "❌ Semua video gagal didownload.")
+            add_log(job_id, "❌ Tidak ada video yang berhasil didownload.")
             return
 
         add_log(job_id, f"📦 Membuat ZIP dari {len(files)} video...")
