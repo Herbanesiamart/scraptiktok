@@ -68,21 +68,33 @@ def add_log(job_id: str, msg: str):
         jobs[job_id]["logs"].append(msg)
 
 
-async def fetch_user_videos(username: str, needed: int) -> list:
+async def fetch_user_videos(username: str, needed: int, log_fn=None) -> list:
     """Ambil daftar video dari profil TikTok via TikWM API."""
     all_videos = []
     cursor = 0
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         while len(all_videos) < needed:
-            resp = await client.get(
+            # TikWM pakai POST dengan form data
+            resp = await client.post(
                 f"{TIKWM_BASE}/user/posts",
-                params={"unique_id": username, "count": 20, "cursor": cursor},
+                data={"unique_id": username, "count": 20, "cursor": cursor},
+                headers={"User-Agent": "Mozilla/5.0"},
             )
-            data = resp.json()
+
+            if resp.status_code != 200:
+                raise Exception(f"TikWM API HTTP {resp.status_code}: {resp.text[:300]}")
+
+            try:
+                data = resp.json()
+            except Exception:
+                raise Exception(f"TikWM response bukan JSON: {resp.text[:300]}")
+
+            if log_fn:
+                log_fn(f"📡 TikWM response code: {data.get('code')} | total video: {data.get('data', {}).get('total', '?')}")
 
             if data.get("code") != 0:
-                break
+                raise Exception(f"TikWM error: {data.get('msg', 'unknown')} (code {data.get('code')})")
 
             videos = data.get("data", {}).get("videos", [])
             if not videos:
@@ -106,7 +118,7 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
         jobs[job_id]["status"] = "downloading"
         add_log(job_id, f"🔍 Mengambil daftar video @{username}...")
 
-        all_videos = await fetch_user_videos(username, end)
+        all_videos = await fetch_user_videos(username, end, log_fn=lambda m: add_log(job_id, m))
 
         if not all_videos:
             jobs[job_id]["status"] = "error"
