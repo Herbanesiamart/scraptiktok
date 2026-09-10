@@ -109,22 +109,16 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
             if not line:
                 continue
 
+            # Log semua baris supaya bisa debug
+            add_log(job_id, line)
+
             if "Destination:" in line:
-                fname = Path(line.split("Destination:")[-1].strip()).name
                 downloaded += 1
                 jobs[job_id]["progress"] = downloaded
-                add_log(job_id, f"⬇️  Video {downloaded}/{total} sedang didownload...")
 
             elif "has already been downloaded" in line:
                 downloaded += 1
                 jobs[job_id]["progress"] = downloaded
-                add_log(job_id, f"✓ Video {downloaded}/{total} sudah ada, skip")
-
-            elif line.startswith("[download]") and "100%" in line:
-                add_log(job_id, f"✅ Video {downloaded}/{total} selesai")
-
-            elif ("ERROR" in line or "Unable to" in line or "not found" in line.lower()):
-                add_log(job_id, f"⚠️  {line}")
 
         await process.wait()
 
