@@ -83,9 +83,10 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
         cmd = [
             "yt-dlp",
             "-I", f"{start}:{end}",
-            "-S", "vcodec:h264,ext:mp4",
             "--merge-output-format", "mp4",
-            "-o", str(output_dir / "%(autonumber)s_%(id)s.mp4"),
+            "--recode-video", "mp4",
+            "--postprocessor-args", "ffmpeg:-vcodec libx264 -acodec aac -movflags +faststart",
+            "-o", str(output_dir / "%(autonumber)s_%(id)s.%(ext)s"),
             "--newline",
             "--no-warnings",
             url,
