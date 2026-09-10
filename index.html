@@ -181,6 +181,34 @@
       margin-top: 8px;
       text-align: center;
     }
+
+    .order-toggle {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .order-toggle input[type="radio"] { display: none; }
+
+    .order-toggle label {
+      flex: 1;
+      margin: 0;
+      padding: 9px 12px;
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #888;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s;
+    }
+
+    .order-toggle input[type="radio"]:checked + label {
+      border-color: #fe2c55;
+      color: #fe2c55;
+      background: rgba(254, 44, 85, 0.08);
+    }
   </style>
 </head>
 <body>
@@ -212,6 +240,14 @@
     </div>
     <p class="hint">Maks 50 video sekali download</p>
 
+    <label>Urutan Download</label>
+    <div class="order-toggle">
+      <input type="radio" name="order" id="orderNewest" value="newest" checked />
+      <label for="orderNewest">🆕 Terbaru dulu</label>
+      <input type="radio" name="order" id="orderOldest" value="oldest" />
+      <label for="orderOldest">🕰️ Terlama dulu</label>
+    </div>
+
     <button class="btn" id="btnStart" onclick="startDownload()">⬇️ Download Sekarang</button>
   </div>
 
@@ -242,6 +278,7 @@
     const username = document.getElementById('username').value.trim();
     const start = parseInt(document.getElementById('start').value);
     const end = parseInt(document.getElementById('end').value);
+    const order = document.querySelector('input[name="order"]:checked').value;
 
     if (!password) return alert('Password wajib diisi!');
     if (!username) return alert('Username TikTok wajib diisi!');
@@ -255,7 +292,7 @@
       const res = await fetch('/api/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, username, start, end }),
+        body: JSON.stringify({ password, username, start, end, order }),
       });
 
       const data = await res.json();

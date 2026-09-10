@@ -22,6 +22,7 @@ class StartRequest(BaseModel):
     username: str
     start: int = 1
     end: int = 10
+    order: str = "newest"  # "newest" | "oldest"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -48,6 +49,8 @@ async def start_download(req: StartRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())
     total = req.end - req.start + 1
 
+    order = req.order if req.order in ("newest", "oldest") else "newest"
+
     jobs[job_id] = {
         "status": "queued",
         "progress": 0,
@@ -57,7 +60,7 @@ async def start_download(req: StartRequest, background_tasks: BackgroundTasks):
         "username": username,
     }
 
-    background_tasks.add_task(run_download, job_id, username, req.start, req.end)
+    background_tasks.add_task(run_download, job_id, username, req.start, req.end, order)
 
     return {"job_id": job_id}
 
@@ -67,7 +70,7 @@ def add_log(job_id: str, msg: str):
         jobs[job_id]["logs"].append(msg)
 
 
-async def run_download(job_id: str, username: str, start: int, end: int):
+async def run_download(job_id: str, username: str, start: int, end: int, order: str = "newest"):
     output_dir = Path(f"/tmp/tktk_{job_id}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -87,6 +90,9 @@ async def run_download(job_id: str, username: str, start: int, end: int):
             "--no-warnings",
             url,
         ]
+
+        if order == "oldest":
+            cmd.insert(1, "--playlist-reverse")
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
