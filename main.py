@@ -87,6 +87,7 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
         cmd = [
             "yt-dlp",
             "-I", f"{start}:{end}",
+            "-f", "bestvideo[vcodec!=none]+bestaudio/bestvideo[vcodec!=none]/best[vcodec!=none]",
             "--merge-output-format", "mp4",
             "--recode-video", "mp4",
             "--postprocessor-args", "ffmpeg:-vcodec libx264 -acodec aac -movflags +faststart",
@@ -156,6 +157,31 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
         shutil.rmtree(output_dir, ignore_errors=True)
         if cookies_path and os.path.exists(cookies_path):
             os.remove(cookies_path)
+
+
+@app.post("/api/debug-formats")
+async def debug_formats(
+    password: str = Form(...),
+    video_url: str = Form(...),
+    cookies: UploadFile = File(...),
+):
+    if password != APP_PASSWORD:
+        raise HTTPException(status_code=401, detail="Password salah")
+
+    tmp_id = str(uuid.uuid4())
+    cookies_path = f"/tmp/cookies_{tmp_id}.txt"
+    content = await cookies.read()
+    with open(cookies_path, "wb") as f:
+        f.write(content)
+
+    cmd = ["yt-dlp", "-F", "--cookies", cookies_path, "--no-warnings", video_url]
+    process = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+    )
+    stdout, _ = await process.communicate()
+    os.remove(cookies_path)
+
+    return {"formats": stdout.decode("utf-8", errors="ignore")}
 
 
 @app.get("/api/progress/{job_id}")
