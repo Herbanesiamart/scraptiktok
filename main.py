@@ -5,12 +5,14 @@ import zipfile
 import json
 import shutil
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Form
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
+import httpx
 
 app = FastAPI()
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "adsy2024")
+TIKWM_BASE = "https://www.tikwm.com/api"
 
 # In-memory job store
 jobs: dict = {}
@@ -30,7 +32,6 @@ async def start_download(
     start: int = Form(1),
     end: int = Form(10),
     order: str = Form("newest"),
-    cookies: UploadFile = File(...),
 ):
     if password != APP_PASSWORD:
         raise HTTPException(status_code=401, detail="Password salah")
@@ -45,26 +46,19 @@ async def start_download(
     if not username:
         raise HTTPException(status_code=400, detail="Username tidak boleh kosong")
 
-    job_id = str(uuid.uuid4())
-    total = end - start + 1
     order = order if order in ("newest", "oldest") else "newest"
-
-    # Simpan cookies.txt sementara
-    cookies_path = f"/tmp/cookies_{job_id}.txt"
-    content = await cookies.read()
-    with open(cookies_path, "wb") as f:
-        f.write(content)
+    job_id = str(uuid.uuid4())
 
     jobs[job_id] = {
         "status": "queued",
         "progress": 0,
-        "total": total,
+        "total": end - start + 1,
         "logs": [],
         "zip_path": None,
         "username": username,
     }
 
-    background_tasks.add_task(run_download, job_id, username, start, end, order, cookies_path)
+    background_tasks.add_task(run_download, job_id, username, start, end, order)
 
     return {"job_id": job_id}
 
@@ -74,66 +68,104 @@ def add_log(job_id: str, msg: str):
         jobs[job_id]["logs"].append(msg)
 
 
-async def run_download(job_id: str, username: str, start: int, end: int, order: str = "newest", cookies_path: str = None):
+async def fetch_user_videos(username: str, needed: int) -> list:
+    """Ambil daftar video dari profil TikTok via TikWM API."""
+    all_videos = []
+    cursor = 0
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        while len(all_videos) < needed:
+            resp = await client.get(
+                f"{TIKWM_BASE}/user/posts",
+                params={"unique_id": username, "count": 20, "cursor": cursor},
+            )
+            data = resp.json()
+
+            if data.get("code") != 0:
+                break
+
+            videos = data.get("data", {}).get("videos", [])
+            if not videos:
+                break
+
+            all_videos.extend(videos)
+
+            if not data["data"].get("hasMore"):
+                break
+
+            cursor = data["data"].get("cursor", 0)
+
+    return all_videos
+
+
+async def run_download(job_id: str, username: str, start: int, end: int, order: str = "newest"):
     output_dir = Path(f"/tmp/tktk_{job_id}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         jobs[job_id]["status"] = "downloading"
-        add_log(job_id, f"🔍 Mencari video dari @{username}...")
+        add_log(job_id, f"🔍 Mengambil daftar video @{username}...")
 
-        url = f"https://www.tiktok.com/@{username}"
+        all_videos = await fetch_user_videos(username, end)
 
-        cmd = [
-            "yt-dlp",
-            "-I", f"{start}:{end}",
-            "-f", "bestvideo[vcodec!=none]+bestaudio/bestvideo[vcodec!=none]/best[vcodec!=none]",
-            "--merge-output-format", "mp4",
-            "--recode-video", "mp4",
-            "--postprocessor-args", "ffmpeg:-vcodec libx264 -acodec aac -movflags +faststart",
-            "-o", str(output_dir / "%(autonumber)s_%(id)s.%(ext)s"),
-            "--newline",
-            "--no-warnings",
-            url,
-        ]
+        if not all_videos:
+            jobs[job_id]["status"] = "error"
+            add_log(job_id, "❌ Akun tidak ditemukan atau tidak ada video.")
+            return
 
-        if cookies_path and os.path.exists(cookies_path):
-            cmd += ["--cookies", cookies_path]
+        # Slice sesuai range (1-indexed)
+        selected = all_videos[start - 1 : end]
 
         if order == "oldest":
-            cmd.insert(1, "--playlist-reverse")
+            selected = list(reversed(selected))
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        total = len(selected)
+        jobs[job_id]["total"] = total
+
+        if total == 0:
+            jobs[job_id]["status"] = "error"
+            add_log(job_id, f"❌ Tidak ada video di range {start}–{end}. Akun hanya punya {len(all_videos)} video.")
+            return
+
+        add_log(job_id, f"✅ Ditemukan {len(all_videos)} video. Mengunduh {total} video (#{start}–#{start + total - 1})...")
 
         downloaded = 0
-        total = end - start + 1
 
-        async for raw in process.stdout:
-            line = raw.decode("utf-8", errors="ignore").strip()
-            if not line:
-                continue
+        async with httpx.AsyncClient(timeout=60) as client:
+            for i, video in enumerate(selected):
+                video_id = video.get("video_id") or video.get("id", f"video_{i}")
+                title = video.get("title", "")[:40].strip() or video_id
 
-            # Log semua baris supaya bisa debug
-            add_log(job_id, line)
+                # Ambil URL video tanpa watermark (HD dulu, fallback ke play)
+                video_url = video.get("hdplay") or video.get("play")
 
-            if "Destination:" in line:
-                downloaded += 1
-                jobs[job_id]["progress"] = downloaded
+                if not video_url:
+                    add_log(job_id, f"⚠️ Video {i+1}/{total} tidak ada URL, skip.")
+                    continue
 
-            elif "has already been downloaded" in line:
-                downloaded += 1
-                jobs[job_id]["progress"] = downloaded
+                add_log(job_id, f"⬇️  Video {i+1}/{total}: {title}")
 
-        await process.wait()
+                try:
+                    resp = await client.get(video_url, follow_redirects=True)
+                    resp.raise_for_status()
+
+                    filename = f"{str(i+1).zfill(5)}_{video_id}.mp4"
+                    filepath = output_dir / filename
+
+                    with open(filepath, "wb") as f:
+                        f.write(resp.content)
+
+                    downloaded += 1
+                    jobs[job_id]["progress"] = downloaded
+                    add_log(job_id, f"✅ Video {i+1}/{total} selesai")
+
+                except Exception as e:
+                    add_log(job_id, f"⚠️ Video {i+1}/{total} gagal: {str(e)}")
 
         files = list(output_dir.iterdir())
         if not files:
             jobs[job_id]["status"] = "error"
-            add_log(job_id, "❌ Tidak ada video yang berhasil didownload. Cek username atau coba lagi.")
+            add_log(job_id, "❌ Semua video gagal didownload.")
             return
 
         add_log(job_id, f"📦 Membuat ZIP dari {len(files)} video...")
@@ -144,8 +176,6 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
                 zf.write(f, f.name)
 
         shutil.rmtree(output_dir, ignore_errors=True)
-        if cookies_path and os.path.exists(cookies_path):
-            os.remove(cookies_path)
 
         jobs[job_id]["status"] = "done"
         jobs[job_id]["zip_path"] = str(zip_path)
@@ -153,35 +183,8 @@ async def run_download(job_id: str, username: str, start: int, end: int, order: 
 
     except Exception as e:
         jobs[job_id]["status"] = "error"
-        add_log(job_id, f"❌ Error tidak terduga: {str(e)}")
+        add_log(job_id, f"❌ Error: {str(e)}")
         shutil.rmtree(output_dir, ignore_errors=True)
-        if cookies_path and os.path.exists(cookies_path):
-            os.remove(cookies_path)
-
-
-@app.post("/api/debug-formats")
-async def debug_formats(
-    password: str = Form(...),
-    video_url: str = Form(...),
-    cookies: UploadFile = File(...),
-):
-    if password != APP_PASSWORD:
-        raise HTTPException(status_code=401, detail="Password salah")
-
-    tmp_id = str(uuid.uuid4())
-    cookies_path = f"/tmp/cookies_{tmp_id}.txt"
-    content = await cookies.read()
-    with open(cookies_path, "wb") as f:
-        f.write(content)
-
-    cmd = ["yt-dlp", "-F", "--cookies", cookies_path, "--no-warnings", video_url]
-    process = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
-    )
-    stdout, _ = await process.communicate()
-    os.remove(cookies_path)
-
-    return {"formats": stdout.decode("utf-8", errors="ignore")}
 
 
 @app.get("/api/progress/{job_id}")
@@ -226,7 +229,6 @@ async def download_zip(job_id: str):
     zip_path = job["zip_path"]
     username = job["username"]
 
-    # Cleanup after 60s
     async def cleanup():
         await asyncio.sleep(60)
         if os.path.exists(zip_path):
