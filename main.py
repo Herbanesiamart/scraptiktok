@@ -80,6 +80,8 @@ async def run_download(job_id: str, username: str, start: int, end: int):
         cmd = [
             "yt-dlp",
             "-I", f"{start}:{end}",
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+            "--merge-output-format", "mp4",
             "-o", str(output_dir / "%(autonumber)s_%(id)s.%(ext)s"),
             "--newline",
             "--no-warnings",
