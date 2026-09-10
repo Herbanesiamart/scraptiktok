@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TikTok Downloader — Adsy</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f0f0f;
+      color: #e5e5e5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 16px;
+      padding: 36px;
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #fe2c55, #25f4ee);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .logo h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .logo span {
+      font-size: 12px;
+      color: #666;
+      display: block;
+      font-weight: 400;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      color: #999;
+      margin-bottom: 6px;
+      margin-top: 16px;
+    }
+
+    input {
+      width: 100%;
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 12px 14px;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus { border-color: #fe2c55; }
+    input::placeholder { color: #444; }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .btn {
+      width: 100%;
+      margin-top: 24px;
+      padding: 13px;
+      background: linear-gradient(135deg, #fe2c55, #c01a3b);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    .btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Progress section */
+    .progress-section {
+      display: none;
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #2a2a2a;
+    }
+
+    .progress-section.visible { display: block; }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      color: #999;
+      margin-bottom: 8px;
+    }
+
+    .progress-bar-wrap {
+      background: #111;
+      border-radius: 99px;
+      height: 8px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #fe2c55, #ff6b8a);
+      border-radius: 99px;
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+
+    .log-box {
+      margin-top: 16px;
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.7;
+      color: #aaa;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .log-box p { margin: 0; }
+    .log-box p.success { color: #4ade80; }
+    .log-box p.error { color: #f87171; }
+    .log-box p.info { color: #60a5fa; }
+
+    .btn-download {
+      display: none;
+      width: 100%;
+      margin-top: 16px;
+      padding: 13px;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+
+    .btn-download:hover { opacity: 0.9; }
+    .btn-download.visible { display: block; }
+
+    .hint {
+      font-size: 12px;
+      color: #555;
+      margin-top: 8px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">
+    <div class="logo-icon">🎵</div>
+    <div>
+      <h1>TikTok Downloader</h1>
+      <span>Internal Tool — Adsy</span>
+    </div>
+  </div>
+
+  <div id="formSection">
+    <label>Password</label>
+    <input type="password" id="password" placeholder="Masukkan password..." />
+
+    <label>Username TikTok</label>
+    <input type="text" id="username" placeholder="@numata atau numata" />
+
+    <label>Range Video</label>
+    <div class="row">
+      <div>
+        <input type="number" id="start" value="1" min="1" placeholder="Dari video ke-" />
+      </div>
+      <div>
+        <input type="number" id="end" value="20" min="1" placeholder="Sampai video ke-" />
+      </div>
+    </div>
+    <p class="hint">Maks 50 video sekali download</p>
+
+    <button class="btn" id="btnStart" onclick="startDownload()">⬇️ Download Sekarang</button>
+  </div>
+
+  <div class="progress-section" id="progressSection">
+    <div class="progress-label">
+      <span id="progressText">Memulai...</span>
+      <span id="progressCount">0 / 0</span>
+    </div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="log-box" id="logBox"></div>
+    <a class="btn-download" id="btnDownload" href="#" onclick="triggerDownload(event)">
+      📥 Download ZIP
+    </a>
+    <button class="btn" style="margin-top:12px; background:#222; border:1px solid #333;" onclick="resetForm()">
+      ↩ Download Lagi
+    </button>
+  </div>
+</div>
+
+<script>
+  let currentJobId = null;
+  let sseSource = null;
+
+  async function startDownload() {
+    const password = document.getElementById('password').value.trim();
+    const username = document.getElementById('username').value.trim();
+    const start = parseInt(document.getElementById('start').value);
+    const end = parseInt(document.getElementById('end').value);
+
+    if (!password) return alert('Password wajib diisi!');
+    if (!username) return alert('Username TikTok wajib diisi!');
+    if (!start || !end || start > end) return alert('Range video tidak valid!');
+    if (end - start >= 50) return alert('Maksimal 50 video sekali download!');
+
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnStart').textContent = 'Memulai...';
+
+    try {
+      const res = await fetch('/api/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, username, start, end }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.detail || 'Terjadi kesalahan');
+        document.getElementById('btnStart').disabled = false;
+        document.getElementById('btnStart').textContent = '⬇️ Download Sekarang';
+        return;
+      }
+
+      currentJobId = data.job_id;
+      showProgress(end - start + 1);
+      listenProgress(data.job_id);
+
+    } catch (e) {
+      alert('Gagal konek ke server: ' + e.message);
+      document.getElementById('btnStart').disabled = false;
+      document.getElementById('btnStart').textContent = '⬇️ Download Sekarang';
+    }
+  }
+
+  function showProgress(total) {
+    document.getElementById('progressSection').classList.add('visible');
+    document.getElementById('progressCount').textContent = `0 / ${total}`;
+    document.getElementById('progressText').textContent = 'Memulai download...';
+  }
+
+  function addLog(msg, type = '') {
+    const box = document.getElementById('logBox');
+    const p = document.createElement('p');
+    if (msg.includes('✅') || msg.includes('✓')) p.className = 'success';
+    else if (msg.includes('❌') || msg.includes('⚠️')) p.className = 'error';
+    else if (msg.includes('🔍') || msg.includes('📦')) p.className = 'info';
+    p.textContent = msg;
+    box.appendChild(p);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function listenProgress(jobId) {
+    if (sseSource) sseSource.close();
+
+    sseSource = new EventSource(`/api/progress/${jobId}`);
+
+    sseSource.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+
+      // Update progress bar
+      const pct = data.total > 0 ? (data.progress / data.total) * 100 : 0;
+      document.getElementById('progressBar').style.width = pct + '%';
+      document.getElementById('progressCount').textContent = `${data.progress} / ${data.total}`;
+      document.getElementById('progressText').textContent =
+        data.status === 'done' ? 'Selesai!' :
+        data.status === 'error' ? 'Terjadi error' :
+        'Sedang download...';
+
+      // Append new logs
+      (data.new_logs || []).forEach(msg => addLog(msg));
+
+      if (data.status === 'done') {
+        sseSource.close();
+        document.getElementById('btnDownload').href = `/api/zip/${jobId}`;
+        document.getElementById('btnDownload').classList.add('visible');
+      } else if (data.status === 'error') {
+        sseSource.close();
+      }
+    };
+
+    sseSource.onerror = () => {
+      sseSource.close();
+      addLog('⚠️ Koneksi SSE terputus');
+    };
+  }
+
+  function triggerDownload(e) {
+    e.preventDefault();
+    window.location.href = `/api/zip/${currentJobId}`;
+  }
+
+  function resetForm() {
+    if (sseSource) sseSource.close();
+    currentJobId = null;
+    document.getElementById('progressSection').classList.remove('visible');
+    document.getElementById('btnDownload').classList.remove('visible');
+    document.getElementById('logBox').innerHTML = '';
+    document.getElementById('progressBar').style.width = '0%';
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStart').textContent = '⬇️ Download Sekarang';
+  }
+</script>
+
+</body>
+</html>
